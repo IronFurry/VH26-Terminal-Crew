@@ -1,24 +1,36 @@
-from fastapi import (
-    FastAPI,
-    WebSocket,
-    WebSocketDisconnect
-)
+import asyncio
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
 
 from models import Event
-from traffic_monitor import TrafficMonitor
+
+from traffic_monitor import (
+    TrafficMonitor
+)
+
 from classifier import classify
-from decision_engine import DecisionEngine
-from processing_engine import ProcessingEngine
+
+from decision_engine import (
+    DecisionEngine
+)
+
 from metrics import Metrics
 
-
-app = FastAPI(
-    title="Intelligent Data Pipeline"
+from kafka_manager import (
+    KafkaManager
 )
+
+from kafka_workers import (
+    KafkaWorkers
+)
+
+from sse import SSEManager
 
 
 # ==========================================
-# Pipeline components
+# COMPONENTS
 # ==========================================
 
 traffic_monitor = TrafficMonitor(
@@ -27,16 +39,60 @@ traffic_monitor = TrafficMonitor(
 
 decision_engine = DecisionEngine()
 
-processing_engine = ProcessingEngine()
-
 metrics = Metrics()
 
+sse_manager = SSEManager()
+
+kafka_manager = KafkaManager()
+
+workers = KafkaWorkers(
+    metrics=metrics,
+    broadcast=lambda:
+        sse_manager.broadcast(
+            metrics.get_status()
+        )
+)
+
+worker_task = None
+
 
 # ==========================================
-# WebSocket clients
+# STARTUP / SHUTDOWN
 # ==========================================
 
-connected_clients = set()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+
+    global worker_task
+
+    # Start Kafka producer
+    await kafka_manager.start_producer()
+
+    # Start Kafka consumers
+    worker_task = asyncio.create_task(
+        workers.start()
+    )
+
+    print("Kafka producer started")
+
+    print("Kafka workers started")
+
+    yield
+
+    # Shutdown
+    if worker_task:
+
+        worker_task.cancel()
+
+    await kafka_manager.stop_producer()
+
+    print("Pipeline stopped")
+
+
+app = FastAPI(
+    title="Intelligent Data Pipeline",
+    lifespan=lifespan
+)
 
 
 # ==========================================
@@ -44,11 +100,13 @@ connected_clients = set()
 # ==========================================
 
 @app.post("/events")
-async def receive_event(event: Event):
+async def receive_event(
+    event: Event
+):
 
-    # --------------------------------------
-    # 1. Monitor traffic
-    # --------------------------------------
+    # ======================================
+    # 1. TRAFFIC MONITOR
+    # ======================================
 
     traffic_monitor.record_event()
 
@@ -57,78 +115,98 @@ async def receive_event(event: Event):
         .get_events_per_minute()
     )
 
-    # --------------------------------------
-    # 2. Classify
-    # --------------------------------------
+
+    # ======================================
+    # 2. CLASSIFIER
+    # ======================================
 
     classified_event = classify(event)
 
-    # --------------------------------------
-    # 3. Decision
-    # --------------------------------------
+
+    # ======================================
+    # 3. DECISION ENGINE
+    # ======================================
 
     decision = decision_engine.decide(
         event=classified_event,
         traffic_rate=traffic_rate
     )
 
-    # --------------------------------------
-    # 4. Metrics
-    # --------------------------------------
 
-    metrics.record(decision)
+    # ======================================
+    # 4. METRICS
+    # ======================================
 
-    # --------------------------------------
-    # 5. Processing
-    # --------------------------------------
-
-    processing_result = (
-        await processing_engine.process(
-            decision
-        )
+    metrics.record_decision(
+        decision
     )
 
-    # --------------------------------------
-    # 6. Update dashboard
-    # --------------------------------------
 
-    await broadcast_metrics()
+    # ======================================
+    # 5. KAFKA
+    # ======================================
 
-    # --------------------------------------
-    # 7. API response
-    # --------------------------------------
+    kafka_result = (
+        await kafka_manager
+        .publish_decision(decision)
+    )
+
+
+    # ======================================
+    # 6. SSE UPDATE
+    # ======================================
+
+    await sse_manager.broadcast(
+        metrics.get_status()
+    )
+
+
+    # ======================================
+    # 7. RESPONSE
+    # ======================================
 
     return {
-        "event_id": decision.event_id,
-        "event_type": decision.event_type,
-        "region": decision.region,
 
-        "traffic_rate": decision.traffic_rate,
+        "event_id":
+            decision.event_id,
 
-        "priority": decision.priority,
+        "event_type":
+            decision.event_type,
 
-        "priority_probability": (
-            decision.priority_probability
-        ),
+        "priority":
+            decision.priority,
 
-        "confidence": decision.confidence,
+        "priority_probability":
+            decision.priority_probability,
 
-        "action": decision.action,
+        "confidence":
+            decision.confidence,
 
-        "batch_size": decision.batch_size,
+        "traffic_rate":
+            decision.traffic_rate,
 
-        "queue_depth": (
-            decision.queue_depth_at_decision
-        ),
+        "action":
+            decision.action,
 
-        "reason": decision.decision_reason,
+        "batch_size":
+            decision.batch_size,
 
-        "processing": processing_result
+        "queue_depth":
+            decision.queue_depth_at_decision,
+
+        "reason":
+            decision.decision_reason,
+
+        "kafka":
+            kafka_result,
+
+        "status":
+            "accepted"
     }
 
 
 # ==========================================
-# METRICS REST API
+# METRICS API
 # ==========================================
 
 @app.get("/metrics")
@@ -138,66 +216,10 @@ async def get_metrics():
 
 
 # ==========================================
-# WEBSOCKET
+# SSE
 # ==========================================
 
-@app.websocket("/ws")
-async def websocket_endpoint(
-    websocket: WebSocket
-):
+@app.get("/events/stream")
+async def event_stream():
 
-    await websocket.accept()
-
-    connected_clients.add(websocket)
-
-    try:
-
-        # Send current state immediately
-        await websocket.send_json(
-            metrics.get_status()
-        )
-
-        while True:
-
-            # Keep connection alive
-            await websocket.receive_text()
-
-    except WebSocketDisconnect:
-
-        connected_clients.discard(
-            websocket
-        )
-
-    except Exception:
-
-        connected_clients.discard(
-            websocket
-        )
-
-
-# ==========================================
-# BROADCAST
-# ==========================================
-
-async def broadcast_metrics():
-
-    if not connected_clients:
-        return
-
-    data = metrics.get_status()
-
-    disconnected = []
-
-    for websocket in connected_clients:
-
-        try:
-
-            await websocket.send_json(data)
-
-        except Exception:
-
-            disconnected.append(websocket)
-
-    for websocket in disconnected:
-
-        connected_clients.discard(websocket)
+    return sse_manager.response()

@@ -38,13 +38,11 @@ def classify(event: Event) -> ClassifiedEvent:
         (0.0, 0.0, 0.0)
     )
 
-    # Normalize transaction value
     transaction_normalized = min(
         event.transaction_value / 50000,
         1.0
     )
 
-    # Calculate scores
     critical_score = (
         base_c
         + 2.0 * transaction_normalized
@@ -62,7 +60,6 @@ def classify(event: Event) -> ClassifiedEvent:
         - 0.5 * event.customer_value
     )
 
-    # Convert scores to probabilities
     probabilities = softmax([
         critical_score,
         medium_score,
