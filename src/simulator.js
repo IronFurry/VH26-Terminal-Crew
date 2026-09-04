@@ -1,5 +1,5 @@
 /**
- * Intelligent Data Pipeline - Real-time Simulation Engine
+ * Intelligent Data Pipeline - Real-time Simulation Engine (React Edition)
  * Models a high-throughput streaming architecture with 3-tier priority queues,
  * adaptive micro-batching, backpressure, and load-shedding safeguards.
  */
@@ -24,7 +24,7 @@ export class PipelineSimulator {
 
     // Current State: 'NORMAL' | 'PRESSURE' | 'OVERLOAD' | 'EXTREME'
     this.systemMode = 'NORMAL';
-    this.modeDescription = 'Processing events individually via stream channels';
+    this.modeDescription = 'Processing events individually via direct stream channels';
 
     // Priority Queues
     this.queues = {
@@ -74,8 +74,8 @@ export class PipelineSimulator {
       batchSize: 1,
       avgBatchSize: 1,
       batchEfficiency: '0%',
-      workerUtilization: 24,
-      queueUtilization: 3,
+      workerUtilization: 28,
+      queueUtilization: 4,
       eventsByType: {
         Payment: 0,
         Order: 0,
@@ -115,7 +115,7 @@ export class PipelineSimulator {
       criticalDropped: 0
     };
 
-    // Pre-seed 30 historical data points for instant smooth graph
+    // Pre-seed historical data points
     const now = Date.now();
     for (let i = 30; i >= 0; i--) {
       const t = new Date(now - i * 1000);
@@ -146,36 +146,22 @@ export class PipelineSimulator {
     return this.isPaused;
   }
 
-  /**
-   * Main simulation step called at 1000ms / 500ms intervals
-   */
   tick(dt = 1.0) {
     if (this.isPaused) return;
 
-    // Smooth ramp towards target incoming rate
     const lerpFactor = this.isSpikeActive ? 0.6 : 0.3;
     this.actualIncomingRate = this.actualIncomingRate + (this.targetRate - this.actualIncomingRate) * lerpFactor;
-    // Add realistic jitter
     const jitter = (Math.random() - 0.5) * (this.isSpikeActive ? 15 : 1.5);
     const currentIncoming = Math.max(5, this.actualIncomingRate + jitter);
 
-    // Incoming count this tick
     const incomingCount = Math.round(currentIncoming * dt);
     this.stats.totalReceived += incomingCount;
 
-    // Determine System State based on incoming rate and queue build-up
     this.updateSystemMode(currentIncoming);
-
-    // Simulate Event Ingestion and Queue Allocation
     this.processIngestion(incomingCount, currentIncoming);
-
-    // Compute Adaptive Worker Capacity
     this.updateWorkerProcessing(dt);
-
-    // Update Naive Comparison Model
     this.updateNaiveModel(currentIncoming, dt);
 
-    // Append to charts history
     const nowStr = new Date().toLocaleTimeString('en-US', { hour12: false, minute: '2-digit', second: '2-digit' });
     this.history.labels.push(nowStr);
     this.history.incoming.push(Number(currentIncoming.toFixed(1)));
@@ -199,7 +185,7 @@ export class PipelineSimulator {
   updateSystemMode(incomingRate) {
     if (incomingRate < 45) {
       this.systemMode = 'NORMAL';
-      this.modeDescription = 'Processing events individually via stream channels';
+      this.modeDescription = 'Processing events individually via direct stream channels';
       this.queues.medium.status = 'STREAMING';
       this.queues.low.status = 'STREAMING';
       this.processingCapacity = 45;
@@ -211,7 +197,7 @@ export class PipelineSimulator {
       this.processingCapacity = 140;
     } else if (incomingRate < 240) {
       this.systemMode = 'OVERLOAD';
-      this.modeDescription = 'High pressure: Deferring low-priority events, batching medium events';
+      this.modeDescription = 'High pressure: Deferring low-priority telemetry, batching medium events';
       this.queues.medium.status = 'BATCHING';
       this.queues.low.status = 'DEFERRED';
       this.processingCapacity = 260;
@@ -225,15 +211,10 @@ export class PipelineSimulator {
   }
 
   processIngestion(count, currentIncoming) {
-    // Proportions:
-    // Payment: 12%, Order: 8% (Total Critical: 20%)
-    // Inventory: 18% (Medium: 18%)
-    // Clicks: 38%, Logs: 24% (Low: 62%)
     const critCount = Math.round(count * 0.20);
     const medCount = Math.round(count * 0.18);
     const lowCount = count - critCount - medCount;
 
-    // Generate specific event instances for live log & queue adjustments
     const batchEvents = [];
 
     // Critical events
@@ -281,7 +262,7 @@ export class PipelineSimulator {
       });
     }
 
-    // Low events (Clicks & Logs)
+    // Low events
     for (let i = 0; i < lowCount; i++) {
       const isClick = Math.random() < 0.61;
       const type = isClick ? 'Clicks' : 'Logs';
@@ -292,7 +273,6 @@ export class PipelineSimulator {
       let timeStr = (110 + Math.floor(Math.random() * 80)) + 'ms';
 
       if (this.systemMode === 'EXTREME') {
-        // Under extreme load, shed non-critical logs and some clicks
         const shouldShed = Math.random() < 0.68;
         if (shouldShed) {
           decision = 'SHED';
@@ -335,11 +315,8 @@ export class PipelineSimulator {
       });
     }
 
-    // Push new events to live stream (keep latest 35)
-    // We pick 4-8 representative events to prepend to the live table
     const sample = [];
     if (batchEvents.length > 0) {
-      // Ensure we sample at least one critical event if available
       const critSample = batchEvents.find(e => e.priority === 'CRITICAL');
       if (critSample) sample.push(critSample);
       
@@ -424,25 +401,21 @@ export class PipelineSimulator {
       this.stats.avgBatchSize = 46;
       this.stats.batchEfficiency = '76%';
     } else { // EXTREME 20× SPIKE
-      // CRITICAL QUEUE REMAINS SMALL & PROTECTED!
-      this.queues.critical.depth = Math.floor(Math.random() * 8) + 3; // <= 11 events
+      this.queues.critical.depth = Math.floor(Math.random() * 8) + 3;
       this.queues.critical.p50 = 45 + Math.floor(Math.random() * 7);
-      this.queues.critical.p95 = 59 + Math.floor(Math.random() * 9); // strictly < 70ms!
-      this.queues.critical.rate = 66.7; // 20% of 333/s
+      this.queues.critical.p95 = 59 + Math.floor(Math.random() * 9);
+      this.queues.critical.rate = 66.7;
 
-      // Medium queue holds bounded buffer
       this.queues.medium.depth = 110 + Math.floor(Math.random() * 40);
       this.queues.medium.p50 = 240 + Math.floor(Math.random() * 40);
       this.queues.medium.p95 = 410 + Math.floor(Math.random() * 60);
       this.queues.medium.rate = 60.0;
 
-      // Low queue buffers and sheds
       this.queues.low.depth = 480 + Math.floor(Math.random() * 120);
       this.queues.low.p50 = 1600 + Math.floor(Math.random() * 200);
       this.queues.low.p95 = 2650 + Math.floor(Math.random() * 350);
       this.queues.low.rate = 180.0;
 
-      // Pipeline dynamically achieves high processed throughput via micro-batching
       this.processedRate = 310 + Math.floor(Math.random() * 20);
       this.stats.workerUtilization = 94 + Math.floor(Math.random() * 5);
       this.stats.queueUtilization = 68;
@@ -452,7 +425,6 @@ export class PipelineSimulator {
       this.stats.batchEfficiency = '88%';
     }
 
-    // Calculate total queue depth
     this.totalQueueDepth = this.queues.critical.depth + this.queues.medium.depth + this.queues.low.depth;
     this.stats.totalProcessed += Math.round(this.processedRate * dt);
   }
@@ -465,12 +437,10 @@ export class PipelineSimulator {
       this.naive.eventsShed = 0;
       this.naive.criticalDropped = 0;
     } else {
-      // In a naive FIFO queue, head-of-line blocking destroys performance
       this.naive.criticalP95 = Math.min(14500, this.naive.criticalP95 + 450);
-      this.naive.throughput = Math.min(95, this.naive.throughput + 2); // capacity bottle-necked
+      this.naive.throughput = Math.min(95, this.naive.throughput + 2);
       this.naive.queueDepth = Math.min(12500, this.naive.queueDepth + 260);
-      this.naive.eventsShed += Math.floor(Math.random() * 25 + 10); // arbitrary drops
-      // Naive queue randomly drops critical payments/orders!
+      this.naive.eventsShed += Math.floor(Math.random() * 25 + 10);
       this.naive.criticalDropped += Math.floor(Math.random() * 5 + 2);
     }
   }

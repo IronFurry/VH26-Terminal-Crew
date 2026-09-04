@@ -1,5 +1,5 @@
 {
-  "name": "intelligent-data-pipeline",
+  "name": "intelligent-data-pipeline-react",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -8,10 +8,15 @@
     "build": "vite build",
     "preview": "vite preview"
   },
-  "devDependencies": {
-    "vite": "^5.4.14"
-  },
   "dependencies": {
-    "chart.js": "^4.4.7"
+    "chart.js": "^4.4.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.14"
   }
 }
