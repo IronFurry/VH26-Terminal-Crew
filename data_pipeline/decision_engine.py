@@ -15,7 +15,6 @@ DRAIN_RATE = {
     "low": 0.3,
 }
 
-
 class DecisionEngine:
     def __init__(self):
         self.queue_depth = {"critical": 0.0, "medium": 0.0, "low": 0.0}

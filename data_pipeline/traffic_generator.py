@@ -1,57 +1,172 @@
-import json
 import random
 import time
-from pathlib import Path
+import json
+import uuid
+from datetime import datetime
 
-REGIONS = ["mumbai", "delhi", "bangalore", "chennai", "pune", "hyderabad"]
-EVENT_TYPES = ["payment", "order", "inventory", "activity", "log"]
-DATA_DIR = Path(__file__).resolve().parent / "data"
 
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+NORMAL_RATE = 1_000       # events/minute
+SPIKE_RATE = 20_000       # events/minute
+
+EVENT_TYPES = [
+    "payment",
+    "activity",
+    "auth",
+    "order",
+    "log",
+    "inventory"
+]
+
+INDIAN_REGIONS = [
+    "mumbai",
+    "delhi",
+    "bangalore",
+    "hyderabad",
+    "chennai",
+    "pune",
+    "kolkata",
+    "ahmedabad",
+    "jaipur",
+    "lucknow",
+    "surat",
+    "kochi",
+    "indore",
+    "chandigarh",
+    "nagpur"
+]
+
+
+# ============================================================
+# EVENT GENERATOR
+# ============================================================
 
 def generate_event():
-    event_type = random.choices(
-        EVENT_TYPES, weights=[15, 15, 20, 30, 20]
-    )[0]
+    event_type = random.choice(EVENT_TYPES)
 
+    # -----------------------------
+    # Customer value
+    # 0.0 = low value customer
+    # 1.0 = high value customer
+    # -----------------------------
+    customer_value = round(random.uniform(0.05, 1.00), 2)
+
+    # -----------------------------
+    # Transaction value
+    # Different event types have
+    # different realistic ranges
+    # -----------------------------
     if event_type == "payment":
-        transaction_value = round(random.uniform(500, 50000), 2)
-        customer_value = round(random.uniform(0.4, 1.0), 2)
-    elif event_type == "order":
-        transaction_value = round(random.uniform(200, 20000), 2)
-        customer_value = round(random.uniform(0.3, 0.9), 2)
-    else:
-        transaction_value = round(random.uniform(0, 500), 2)
-        customer_value = round(random.uniform(0.0, 0.6), 2)
+        transaction_value = random.uniform(100, 100000)
 
-    return {
+    elif event_type == "order":
+        transaction_value = random.uniform(300, 50000)
+
+    elif event_type == "inventory":
+        transaction_value = random.uniform(500, 25000)
+
+    elif event_type == "auth":
+        transaction_value = 0
+
+    elif event_type == "activity":
+        transaction_value = random.uniform(0, 5000)
+
+    else:  # log
+        transaction_value = 0
+
+    # -----------------------------
+    # Processing cost
+    # Simulated compute cost
+    # -----------------------------
+    if event_type in ["payment", "order"]:
+        processing_cost = random.uniform(0.50, 1.00)
+
+    elif event_type == "auth":
+        processing_cost = random.uniform(0.20, 0.60)
+
+    elif event_type == "inventory":
+        processing_cost = random.uniform(0.30, 0.80)
+
+    elif event_type == "activity":
+        processing_cost = random.uniform(0.10, 0.50)
+
+    else:  # log
+        processing_cost = random.uniform(0.05, 0.30)
+
+    # -----------------------------
+    # Data size in MB
+    # -----------------------------
+    if event_type in ["payment", "order"]:
+        data_size = random.uniform(1.0, 10.0)
+
+    elif event_type == "inventory":
+        data_size = random.uniform(1.0, 8.0)
+
+    elif event_type == "auth":
+        data_size = random.uniform(0.2, 2.0)
+
+    elif event_type == "activity":
+        data_size = random.uniform(0.1, 5.0)
+
+    else:  # log
+        data_size = random.uniform(0.05, 2.0)
+
+    # -----------------------------
+    # Build event
+    # -----------------------------
+    event = {
         "event_id": f"evt_{random.randint(100000, 999999)}",
         "event_type": event_type,
         "timestamp": int(time.time()),
         "customer_value": customer_value,
-        "transaction_value": transaction_value,
-        "processing_cost": round(random.uniform(0.05, 1.0), 2),
-        "data_size": round(random.uniform(0.5, 10.0), 2),
-        "region": random.choice(REGIONS),
+        "transaction_value": round(transaction_value, 2),
+        "processing_cost": round(processing_cost, 2),
+        "data_size": round(data_size, 2),
+        "region": random.choice(INDIAN_REGIONS)
     }
 
-
-def write_events(n_events, out_path):
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "w", encoding="utf-8") as f:
-        for _ in range(n_events):
-            f.write(json.dumps(generate_event()) + "\n")
-    print(f"Wrote {n_events} events to {out_path}")
+    return event
 
 
-def main():
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    # Baseline load: ~1,000 events/minute
-    write_events(1000, DATA_DIR / "baseline_1k.jsonl")
+# ============================================================
+# TRAFFIC GENERATOR
+# ============================================================
 
-    # Flash sale spike: ~20,000 events/minute (20x surge)
-    write_events(20000, DATA_DIR / "spike_20k.jsonl")
+def generate_traffic(rate_per_minute):
+    """
+    Generate traffic at the requested rate.
 
+    Example:
+        1000 events/minute
+        20000 events/minute
+    """
+
+    interval = 60 / rate_per_minute
+
+    print("=" * 60)
+    print(f"Traffic Generator Started")
+    print(f"Rate: {rate_per_minute:,} events/minute")
+    print(f"Rate: {rate_per_minute / 60:.2f} events/second")
+    print("=" * 60)
+
+    while True:
+
+        event = generate_event()
+
+        # This is the generated request
+        print(json.dumps(event))
+
+        time.sleep(interval)
+
+
+# ============================================================
+# MAIN
+# ============================================================
 
 if __name__ == "__main__":
-    main()
+
+    # Change this to SPIKE_RATE for 20K events/minute
+    generate_traffic(NORMAL_RATE)

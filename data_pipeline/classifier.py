@@ -10,7 +10,6 @@ BASE_WEIGHTS = {
     "log":       (-2.0, 0.0, 3.0),
 }
 
-
 def softmax(scores):
     m = max(scores)
     exps = [math.exp(s - m) for s in scores]
