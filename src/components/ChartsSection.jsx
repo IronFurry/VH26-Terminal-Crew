@@ -143,7 +143,7 @@ export function ChartsSection({ history, isSpikeActive, theme }) {
             grid: { color: gridLine },
             ticks: { color: tickColor, font: chartFont },
             suggestedMin: 0,
-            suggestedMax: 1000
+            suggestedMax: 3000
           }
         },
         plugins: {

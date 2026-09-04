@@ -515,11 +515,9 @@ export class PipelineSimulator {
    * and update all stats from the real pipeline output.
    */
   processIngestion(count) {
-    // Cap per-tick event generation for performance (browser cap at 80 events/tick)
-    const sampleCount = Math.min(count, 80);
     const batchEvents = [];
 
-    for (let i = 0; i < sampleCount; i++) {
+    for (let i = 0; i < count; i++) {
       // 1. Generate raw event (traffic_generator.py)
       const raw = generateEvent();
 
@@ -537,12 +535,15 @@ export class PipelineSimulator {
 
       if (action === 'STREAM') {
         this.stats.eventsByStrategy.Streamed++;
+        this.stats.totalProcessed++;
       } else if (action === 'BATCH') {
         this.stats.eventsByStrategy.Batched++;
         this.stats.totalBatched++;
+        this.stats.totalProcessed++;
       } else if (action === 'DEFER') {
         this.stats.eventsByStrategy.Deferred++;
         this.stats.totalBatched++;
+        this.stats.totalProcessed++;
       } else if (action === 'SHED') {
         this.stats.eventsByStrategy.Shed++;
         this.stats.totalShed++;
@@ -550,17 +551,22 @@ export class PipelineSimulator {
         else                       this.stats.clicksShed++;
       }
 
-      batchEvents.push({
-        id: decided.event_id,
-        type: EVENT_TYPE_DISPLAY[event_type] || event_type,
-        priority,
-        decision: action,
-        time: latencyString(action, priority, this.isSpikeActive),
-        status: actionStatus(action),
-        confidence: decided.confidence,
-        region: decided.region,
-        prob: decided.priority_probability,
-      });
+      // Collect sample for the live feed (max 20 candidates to avoid memory churn)
+      if (batchEvents.length < 20 || priority === 'CRITICAL') {
+        if (batchEvents.length < 20) {
+          batchEvents.push({
+            id: decided.event_id,
+            type: EVENT_TYPE_DISPLAY[event_type] || event_type,
+            priority,
+            decision: action,
+            time: latencyString(action, priority, this.isSpikeActive),
+            status: actionStatus(action),
+            confidence: decided.confidence,
+            region: decided.region,
+            prob: decided.priority_probability,
+          });
+        }
+      }
     }
 
     // Sample a subset for live feed (at most 8 per tick, always include a critical if available)
@@ -665,7 +671,6 @@ export class PipelineSimulator {
     }
 
     this.totalQueueDepth = this.queues.critical.depth + this.queues.medium.depth + this.queues.low.depth;
-    this.stats.totalProcessed += Math.round(this.processedRate * dt);
   }
 
   updateNaiveModel(incomingRate, dt) {

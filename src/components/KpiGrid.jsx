@@ -1,6 +1,7 @@
 import React from 'react';
 
 export function KpiGrid({
+  wsConnected,
   actualIncomingRate,
   targetRate,
   isSpikeActive,
@@ -17,6 +18,28 @@ export function KpiGrid({
   totalShed
 }) {
   return (
+    <>
+      {/* Backend connection status badge */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 4px 6px', gap: 8, alignItems: 'center' }}>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
+          padding: '3px 10px', borderRadius: 20,
+          background: wsConnected ? 'var(--success-subtle, rgba(16,185,129,0.12))' : 'rgba(99,102,241,0.12)',
+          color: wsConnected ? 'var(--success, #10b981)' : '#818cf8',
+          border: `1px solid ${wsConnected ? 'rgba(16,185,129,0.3)' : 'rgba(99,102,241,0.3)'}`,
+          transition: 'all 0.4s ease',
+        }}>
+          <span style={{
+            width: 7, height: 7, borderRadius: '50%',
+            background: wsConnected ? 'var(--success, #10b981)' : '#818cf8',
+            boxShadow: wsConnected ? '0 0 0 2px rgba(16,185,129,0.25)' : '0 0 0 2px rgba(99,102,241,0.25)',
+            animation: 'pulse 2s infinite',
+            flexShrink: 0,
+          }} />
+          {wsConnected ? 'LIVE BACKEND · ws://localhost:8000' : 'SIMULATOR ACTIVE · Standalone Engine'}
+        </span>
+      </div>
     <section className="kpi-grid">
       {/* 1. Incoming Rate */}
       <div className="card">
@@ -150,5 +173,6 @@ export function KpiGrid({
         </div>
       </div>
     </section>
+    </>
   );
 }

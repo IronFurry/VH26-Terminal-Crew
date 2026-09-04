@@ -146,8 +146,9 @@ export function App() {
         modeDescription={sim.modeDescription}
       />
 
-      {/* 3. 6 KPI Cards */}
+      {/* 3. 6 KPI Cards — powered by standalone simulator */}
       <KpiGrid
+        wsConnected={false}
         actualIncomingRate={sim.actualIncomingRate}
         targetRate={sim.targetRate}
         isSpikeActive={sim.isSpikeActive}

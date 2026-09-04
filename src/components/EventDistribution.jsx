@@ -12,16 +12,33 @@ export function EventDistribution({ eventsByType, totalProcessed, theme }) {
   const tipBody = isDark ? '#94a3b8' : '#475569';
   const chartFont = { family: "'JetBrains Mono', monospace", size: 10 };
 
+  const payment = eventsByType?.Payment || 0;
+  const order = eventsByType?.Order || 0;
+  const inventory = eventsByType?.Inventory || 0;
+  const clicks = eventsByType?.Clicks || 0;
+  const logs = eventsByType?.Logs || 0;
+
+  const totalEvents = payment + order + inventory + clicks + logs;
+
+  const getPercent = (count) => {
+    if (!totalEvents) return '0%';
+    return `${Math.round((count / totalEvents) * 100)}%`;
+  };
+
   useEffect(() => {
     if (!canvasRef.current) return;
     const ctx = canvasRef.current.getContext('2d');
+
+    const initialData = totalEvents > 0
+      ? [payment, order, inventory, clicks, logs]
+      : [1, 1, 1, 1, 1];
 
     chartRef.current = new Chart(ctx, {
       type: 'doughnut',
       data: {
         labels: ['Payment', 'Order', 'Inventory', 'Clicks', 'Logs'],
         datasets: [{
-          data: [12, 8, 18, 38, 24],
+          data: initialData,
           backgroundColor: ['#059669', '#10b981', '#ea580c', '#0284c7', '#64748b'],
           borderColor: isDark ? '#0e131f' : '#ffffff',
           borderWidth: 2,
@@ -40,7 +57,14 @@ export function EventDistribution({ eventsByType, totalProcessed, theme }) {
             borderWidth: 1,
             titleColor: tipTitle,
             bodyColor: tipBody,
-            bodyFont: chartFont
+            bodyFont: chartFont,
+            callbacks: {
+              label: function(context) {
+                const val = context.raw || 0;
+                const pct = totalEvents > 0 ? Math.round((val / totalEvents) * 100) : 0;
+                return ` ${context.label}: ${val.toLocaleString()} (${pct}%)`;
+              }
+            }
           }
         }
       }
@@ -53,6 +77,9 @@ export function EventDistribution({ eventsByType, totalProcessed, theme }) {
 
   useEffect(() => {
     if (chartRef.current) {
+      if (totalEvents > 0) {
+        chartRef.current.data.datasets[0].data = [payment, order, inventory, clicks, logs];
+      }
       chartRef.current.data.datasets[0].borderColor = isDark ? '#0e131f' : '#ffffff';
       chartRef.current.options.plugins.tooltip.backgroundColor = tipBg;
       chartRef.current.options.plugins.tooltip.borderColor = tipBorder;
@@ -60,7 +87,7 @@ export function EventDistribution({ eventsByType, totalProcessed, theme }) {
       chartRef.current.options.plugins.tooltip.bodyColor = tipBody;
       chartRef.current.update('none');
     }
-  }, [theme, isDark, tipBg, tipBorder, tipTitle, tipBody]);
+  }, [payment, order, inventory, clicks, logs, totalEvents, theme, isDark, tipBg, tipBorder, tipTitle, tipBody]);
 
   return (
     <div className="distribution-card">
@@ -80,37 +107,37 @@ export function EventDistribution({ eventsByType, totalProcessed, theme }) {
           <div className="strategy-item">
             <div className="strategy-item-name">
               <span className="legend-dot" style={{ background: '#059669' }}></span>
-              <span>Payments (12%)</span>
+              <span>Payments ({getPercent(payment)})</span>
             </div>
-            <span className="strategy-item-val text-emerald">{eventsByType.Payment.toLocaleString()}</span>
+            <span className="strategy-item-val text-emerald">{payment.toLocaleString()}</span>
           </div>
           <div className="strategy-item">
             <div className="strategy-item-name">
               <span className="legend-dot" style={{ background: '#10b981' }}></span>
-              <span>Orders (8%)</span>
+              <span>Orders ({getPercent(order)})</span>
             </div>
-            <span className="strategy-item-val text-emerald">{eventsByType.Order.toLocaleString()}</span>
+            <span className="strategy-item-val text-emerald">{order.toLocaleString()}</span>
           </div>
           <div className="strategy-item">
             <div className="strategy-item-name">
               <span className="legend-dot" style={{ background: '#ea580c' }}></span>
-              <span>Inventory (18%)</span>
+              <span>Inventory ({getPercent(inventory)})</span>
             </div>
-            <span className="strategy-item-val text-orange">{eventsByType.Inventory.toLocaleString()}</span>
+            <span className="strategy-item-val text-orange">{inventory.toLocaleString()}</span>
           </div>
           <div className="strategy-item">
             <div className="strategy-item-name">
               <span className="legend-dot" style={{ background: '#0284c7' }}></span>
-              <span>Clicks (38%)</span>
+              <span>Clicks ({getPercent(clicks)})</span>
             </div>
-            <span className="strategy-item-val text-cyan">{eventsByType.Clicks.toLocaleString()}</span>
+            <span className="strategy-item-val text-cyan">{clicks.toLocaleString()}</span>
           </div>
           <div className="strategy-item">
             <div className="strategy-item-name">
               <span className="legend-dot" style={{ background: '#64748b' }}></span>
-              <span>Logs (24%)</span>
+              <span>Logs ({getPercent(logs)})</span>
             </div>
-            <span className="strategy-item-val text-muted">{eventsByType.Logs.toLocaleString()}</span>
+            <span className="strategy-item-val text-muted">{logs.toLocaleString()}</span>
           </div>
         </div>
       </div>
@@ -118,7 +145,7 @@ export function EventDistribution({ eventsByType, totalProcessed, theme }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, paddingTop: 8, borderTop: '1px solid var(--border-subtle)' }}>
         <span className="text-muted">Total Events Processed:</span>
         <span className="mono text-orange" style={{ fontWeight: 700 }}>
-          {totalProcessed.toLocaleString()}
+          {totalEvents.toLocaleString()}
         </span>
       </div>
     </div>
