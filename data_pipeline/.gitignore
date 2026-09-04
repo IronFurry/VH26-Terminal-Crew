@@ -1,0 +1,5 @@
+# Ignore generated pipeline data files
+data/*.jsonl
+data/
+__pycache__/
+*.pyc
