@@ -1,0 +1,17 @@
+{
+  "name": "intelligent-data-pipeline",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^5.4.14"
+  },
+  "dependencies": {
+    "chart.js": "^4.4.7"
+  }
+}
