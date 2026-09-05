@@ -20,6 +20,9 @@ export function LiveEventFeed({ liveEvents }) {
             <span className="pulse-dot"></span>
             REALTIME
           </span>
+          <span className="badge" style={{ fontSize: 10, padding: '2px 8px', background: 'var(--bg-surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+            {Math.min(filtered.length, 50)} / 50 stored
+          </span>
         </div>
 
         <div className="feed-filters">
@@ -66,7 +69,7 @@ export function LiveEventFeed({ liveEvents }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.slice(0, 15).map(event => {
+            {filtered.slice(0, 50).map(event => {
               let pBadgeClass = 'p-low';
               if (event.priority === 'CRITICAL') pBadgeClass = 'p-critical';
               if (event.priority === 'MEDIUM') pBadgeClass = 'p-medium';

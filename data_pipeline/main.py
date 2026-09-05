@@ -1,25 +1,43 @@
-from fastapi import (
-    FastAPI,
-    WebSocket,
-    WebSocketDisconnect
-)
+import asyncio
+import httpx
+import time
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
 
 from models import Event
-from traffic_monitor import TrafficMonitor
-from classifier import classify
-from decision_engine import DecisionEngine
-from processing_engine import ProcessingEngine
-from metrics import Metrics
 
-
-app = FastAPI(
-    title="Intelligent Data Pipeline"
+from traffic_monitor import (
+    TrafficMonitor
 )
 
+from classifier import classify
+
+from decision_engine import (
+    DecisionEngine
+)
+
+from metrics import Metrics
+
+from kafka_manager import (
+    KafkaManager
+)
+
+from kafka_workers import (
+    KafkaWorkers
+)
+
+from sse import SSEManager
+from storage_manager import StorageManager
+
 
 # ==========================================
-# Pipeline components
+# COMPONENTS
 # ==========================================
+
+storage_manager = StorageManager()
+storage_flush_task = None
 
 traffic_monitor = TrafficMonitor(
     window_seconds=10
@@ -27,16 +45,231 @@ traffic_monitor = TrafficMonitor(
 
 decision_engine = DecisionEngine()
 
-processing_engine = ProcessingEngine()
-
 metrics = Metrics()
 
+sse_manager = SSEManager()
+
+kafka_manager = KafkaManager()
+
+_last_sse_time = 0.0
+
+def _schedule_sse_broadcast(decision):
+    """
+    Non-blocking, throttled SSE broadcaster.
+    Sends at most 10 updates per second so the FastAPI event loop and
+    the browser's React renderer are not choked at high traffic volumes.
+    """
+    global _last_sse_time
+    now = time.time()
+    if now - _last_sse_time >= 0.1:
+        _last_sse_time = now
+        status = metrics.get_status()
+        status["latest_event"] = {
+            "event_id": decision.event_id,
+            "event_type": decision.event_type,
+            "priority": decision.priority,
+            "confidence": decision.confidence,
+            "action": decision.action,
+            "region": decision.region,
+            "transaction_value": decision.transaction_value,
+            "timestamp": decision.timestamp,
+            "queue_depth": decision.queue_depth_at_decision,
+            "reason": decision.decision_reason
+        }
+        status["incoming_rate"] = round(incoming_rate_per_second, 2)
+        status["incoming_rate_per_minute"] = round(incoming_rate_per_second * 60, 2)
+        status["total_incoming"] = incoming_count
+        asyncio.create_task(sse_manager.broadcast(status))
+
+workers = KafkaWorkers(
+    metrics=metrics,
+    broadcast=lambda:
+        sse_manager.broadcast(
+            metrics.get_status()
+        )
+)
+
+worker_task = None
+
+incoming_rate_task = None
+
 
 # ==========================================
-# WebSocket clients
+# ACTUAL INCOMING TRAFFIC MONITOR
 # ==========================================
 
-connected_clients = set()
+# Total number of requests that have
+# reached /events
+
+incoming_count = 0
+
+# Actual measured incoming rate
+incoming_rate_per_second = 0.0
+
+
+# ==========================================
+# INCOMING TRAFFIC RATE MONITOR
+# ==========================================
+
+async def incoming_rate_monitor():
+
+    global incoming_count
+    global incoming_rate_per_second
+
+    # Count at the beginning of the
+    # measurement window
+
+    previous_count = incoming_count
+
+    while True:
+
+        # ======================================
+        # WAIT 1 SECOND
+        # ======================================
+
+        await asyncio.sleep(1)
+
+        # ======================================
+        # CURRENT COUNT
+        # ======================================
+
+        current_count = incoming_count
+
+        # ======================================
+        # EVENTS RECEIVED DURING LAST SECOND
+        # ======================================
+
+        incoming_rate_per_second = (
+            current_count
+            - previous_count
+        )
+
+        previous_count = current_count
+
+        # ======================================
+        # TERMINAL OUTPUT
+        # ======================================
+
+        print(
+            f"ACTUAL INCOMING RATE: "
+            f"{incoming_rate_per_second} events/sec | "
+            f"{incoming_rate_per_second * 60} events/min | "
+            f"TOTAL: {current_count}"
+        )
+
+        # ======================================
+        # SEND DIRECTLY TO FRONTEND
+        # ======================================
+
+        await sse_manager.broadcast({
+
+            "type":
+                "incoming_traffic",
+
+            "incoming_rate":
+                round(
+                    incoming_rate_per_second,
+                    2
+                ),
+
+            "incoming_rate_per_minute":
+                round(
+                    incoming_rate_per_second * 60,
+                    2
+                ),
+
+            "total_incoming":
+                current_count
+        })
+
+
+# ==========================================
+# STARTUP / SHUTDOWN
+# ==========================================
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+
+    global worker_task
+    global incoming_rate_task
+    global storage_flush_task
+
+    # ======================================
+    # START STORAGE (REDIS & MONGO)
+    # ======================================
+
+    storage_manager.connect()
+    storage_flush_task = asyncio.create_task(
+        storage_manager.auto_flush_loop()
+    )
+
+    # ======================================
+    # START KAFKA PRODUCER
+    # ======================================
+
+    await kafka_manager.start_producer()
+
+    # ======================================
+    # START KAFKA CONSUMERS
+    # ======================================
+
+    worker_task = asyncio.create_task(
+        workers.start()
+    )
+
+    # ======================================
+    # START INCOMING RATE MONITOR
+    # ======================================
+
+    incoming_rate_task = asyncio.create_task(
+        incoming_rate_monitor()
+    )
+
+    print("Kafka producer started")
+    print("Kafka workers started")
+    print("Incoming traffic monitor started")
+    print("Redis & MongoDB storage pipeline started")
+
+    yield
+
+    # ======================================
+    # SHUTDOWN
+    # ======================================
+
+    if storage_flush_task:
+        storage_flush_task.cancel()
+
+    if worker_task:
+        worker_task.cancel()
+
+    if incoming_rate_task:
+        incoming_rate_task.cancel()
+
+    await kafka_manager.stop_producer()
+
+    print("Pipeline stopped")
+
+
+# ==========================================
+# FASTAPI APPLICATION
+# ==========================================
+
+from fastapi.middleware.cors import CORSMiddleware
+
+
+app = FastAPI(
+    title="Intelligent Data Pipeline",
+    lifespan=lifespan
+)
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ==========================================
@@ -44,11 +277,25 @@ connected_clients = set()
 # ==========================================
 
 @app.post("/events")
-async def receive_event(event: Event):
+async def receive_event(
+    event: Event
+):
 
-    # --------------------------------------
-    # 1. Monitor traffic
-    # --------------------------------------
+    global incoming_count
+
+    # ======================================
+    # 0. ACTUAL INCOMING REQUEST
+    # ======================================
+
+    # Count the request immediately
+    # when it reaches the pipeline.
+
+    incoming_count += 1
+
+
+    # ======================================
+    # 1. TRAFFIC MONITOR
+    # ======================================
 
     traffic_monitor.record_event()
 
@@ -57,147 +304,192 @@ async def receive_event(event: Event):
         .get_events_per_minute()
     )
 
-    # --------------------------------------
-    # 2. Classify
-    # --------------------------------------
+
+    # ======================================
+    # 2. CLASSIFIER
+    # ======================================
 
     classified_event = classify(event)
 
-    # --------------------------------------
-    # 3. Decision
-    # --------------------------------------
+
+    # ======================================
+    # 3. DECISION ENGINE
+    # ======================================
 
     decision = decision_engine.decide(
         event=classified_event,
         traffic_rate=traffic_rate
     )
 
-    # --------------------------------------
-    # 4. Metrics
-    # --------------------------------------
 
-    metrics.record(decision)
+    # ======================================
+    # 4. METRICS
+    # ======================================
 
-    # --------------------------------------
-    # 5. Processing
-    # --------------------------------------
-
-    processing_result = (
-        await processing_engine.process(
-            decision
-        )
+    metrics.record_decision(
+        decision
     )
 
-    # --------------------------------------
-    # 6. Update dashboard
-    # --------------------------------------
 
-    await broadcast_metrics()
+    # ======================================
+    # 5. STORAGE (REDIS STREAM -> MONGO)
+    # ======================================
 
-    # --------------------------------------
-    # 7. API response
-    # --------------------------------------
+    storage_manager.push_event(decision.model_dump())
+
+
+    # ======================================
+    # 6. KAFKA
+    # ======================================
+
+    kafka_result = (
+        await kafka_manager
+        .publish_decision(decision)
+    )
+
+
+    # ======================================
+    # 6. SSE UPDATE (Throttled & Non-blocking)
+    # ======================================
+
+    _schedule_sse_broadcast(decision)
+
+
+    # ======================================
+    # 7. RESPONSE
+    # ======================================
 
     return {
-        "event_id": decision.event_id,
-        "event_type": decision.event_type,
-        "region": decision.region,
 
-        "traffic_rate": decision.traffic_rate,
+        "event_id":
+            decision.event_id,
 
-        "priority": decision.priority,
+        "event_type":
+            decision.event_type,
 
-        "priority_probability": (
-            decision.priority_probability
-        ),
+        "priority":
+            decision.priority,
 
-        "confidence": decision.confidence,
+        "priority_probability":
+            decision.priority_probability,
 
-        "action": decision.action,
+        "confidence":
+            decision.confidence,
 
-        "batch_size": decision.batch_size,
+        # Existing pipeline rate
+        "traffic_rate":
+            decision.traffic_rate,
 
-        "queue_depth": (
-            decision.queue_depth_at_decision
-        ),
+        # Actual incoming rate
+        "incoming_rate":
+            round(
+                incoming_rate_per_second,
+                2
+            ),
 
-        "reason": decision.decision_reason,
+        "action":
+            decision.action,
 
-        "processing": processing_result
+        "batch_size":
+            decision.batch_size,
+
+        "queue_depth":
+            decision.queue_depth_at_decision,
+
+        "reason":
+            decision.decision_reason,
+
+        "kafka":
+            kafka_result,
+
+        "status":
+            "accepted"
     }
 
 
 # ==========================================
-# METRICS REST API
+# METRICS API
 # ==========================================
 
 @app.get("/metrics")
 async def get_metrics():
 
-    return metrics.get_status()
+    status = metrics.get_status()
+
+    status["incoming_rate"] = round(
+        incoming_rate_per_second,
+        2
+    )
+
+    status["incoming_rate_per_minute"] = round(
+        incoming_rate_per_second * 60,
+        2
+    )
+
+    status["total_incoming"] = (
+        incoming_count
+    )
+
+    status["storage"] = storage_manager.get_stats()
+
+    return status
 
 
 # ==========================================
-# WEBSOCKET
+# STORAGE API (REDIS & MONGODB)
 # ==========================================
 
-@app.websocket("/ws")
-async def websocket_endpoint(
-    websocket: WebSocket
-):
+@app.get("/storage/stats")
+async def get_storage_stats():
+    """Returns telemetry on Redis Stream depth and MongoDB collection count."""
+    return storage_manager.get_stats()
 
-    await websocket.accept()
 
-    connected_clients.add(websocket)
+@app.post("/storage/flush")
+async def flush_storage():
+    """Manually flushes a batch of events from Redis into MongoDB."""
+    return storage_manager.drain_batch_to_mongo()
 
+
+
+# ==========================================
+# TRAFFIC GENERATOR PROXY
+# ==========================================
+
+@app.post("/traffic/toggle")
+async def proxy_traffic_toggle():
+    """
+    Proxy: forwards the toggle request to the traffic generator
+    running on port 8001. This lets the frontend reach the toggle
+    via either port 8000 or port 8001.
+    """
     try:
-
-        # Send current state immediately
-        await websocket.send_json(
-            metrics.get_status()
-        )
-
-        while True:
-
-            # Keep connection alive
-            await websocket.receive_text()
-
-    except WebSocketDisconnect:
-
-        connected_clients.discard(
-            websocket
-        )
-
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.post("http://localhost:8001/traffic/toggle")
+            return resp.json()
     except Exception:
+        return {
+            "error": "Traffic generator not reachable on port 8001",
+            "hint": "Start traffic_generator.py first"
+        }
 
-        connected_clients.discard(
-            websocket
-        )
+
+@app.get("/traffic/status")
+async def proxy_traffic_status():
+    """Proxy: returns live traffic generator status from port 8001."""
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get("http://localhost:8001/traffic/status")
+            return resp.json()
+    except Exception:
+        return {"error": "Traffic generator not reachable"}
 
 
 # ==========================================
-# BROADCAST
+# SSE
 # ==========================================
 
-async def broadcast_metrics():
+@app.get("/events/stream")
+async def event_stream():
 
-    if not connected_clients:
-        return
-
-    data = metrics.get_status()
-
-    disconnected = []
-
-    for websocket in connected_clients:
-
-        try:
-
-            await websocket.send_json(data)
-
-        except Exception:
-
-            disconnected.append(websocket)
-
-    for websocket in disconnected:
-
-        connected_clients.discard(websocket)
+    return sse_manager.response()

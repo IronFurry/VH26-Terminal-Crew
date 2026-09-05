@@ -587,8 +587,8 @@ export class PipelineSimulator {
       this.liveEvents.unshift({ ...e, timestamp: timeHeader });
     });
 
-    if (this.liveEvents.length > 40) {
-      this.liveEvents.length = 40;
+    if (this.liveEvents.length > 50) {
+      this.liveEvents.length = 50;
     }
   }
 

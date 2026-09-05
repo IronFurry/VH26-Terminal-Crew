@@ -4,10 +4,15 @@ from collections import deque
 
 class TrafficMonitor:
 
-    def __init__(self, window_seconds: int = 10):
+    def __init__(
+        self,
+        window_seconds: int = 10
+    ):
 
         self.window_seconds = window_seconds
+
         self.timestamps = deque()
+
 
     def record_event(self):
 
@@ -16,6 +21,7 @@ class TrafficMonitor:
         self.timestamps.append(now)
 
         self._cleanup(now)
+
 
     def _cleanup(self, now):
 
@@ -30,6 +36,7 @@ class TrafficMonitor:
 
             self.timestamps.popleft()
 
+
     def get_events_per_minute(self) -> float:
 
         now = time.time()
@@ -43,6 +50,7 @@ class TrafficMonitor:
             / self.window_seconds
             * 60
         )
+
 
     def get_current_count(self) -> int:
 

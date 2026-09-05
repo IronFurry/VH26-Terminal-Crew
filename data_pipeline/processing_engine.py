@@ -12,31 +12,10 @@ class ProcessingEngine:
 
         action = decision.action
 
-        # ======================================
-        # SHED
-        # ======================================
 
-        if action == "SHED":
-
-            return {
-                "event_id": decision.event_id,
-                "status": "shed"
-            }
-
-        # ======================================
-        # DEFER
-        # ======================================
-
-        if action == "DEFER":
-
-            return {
-                "event_id": decision.event_id,
-                "status": "deferred"
-            }
-
-        # ======================================
+        # ==========================================
         # STREAM
-        # ======================================
+        # ==========================================
 
         if action == "STREAM":
 
@@ -47,12 +26,14 @@ class ProcessingEngine:
             return {
                 "event_id": decision.event_id,
                 "status": "processed",
-                "mode": "stream"
+                "mode": "stream",
+                "priority": decision.priority
             }
 
-        # ======================================
+
+        # ==========================================
         # BATCH
-        # ======================================
+        # ==========================================
 
         if action == "BATCH":
 
@@ -64,8 +45,23 @@ class ProcessingEngine:
                 "event_id": decision.event_id,
                 "status": "processed",
                 "mode": "batch",
-                "batch_size": decision.batch_size
+                "batch_size": decision.batch_size,
+                "priority": decision.priority
             }
+
+
+        # ==========================================
+        # DEFER
+        # ==========================================
+
+        if action == "DEFER":
+
+            return {
+                "event_id": decision.event_id,
+                "status": "deferred",
+                "priority": decision.priority
+            }
+
 
         return {
             "event_id": decision.event_id,

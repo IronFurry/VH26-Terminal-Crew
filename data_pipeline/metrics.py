@@ -9,9 +9,18 @@ class Metrics:
     def __init__(self):
 
         self.total_events = 0
+
         self.processed_events = 0
+
         self.deferred_events = 0
+
         self.shed_events = 0
+
+        self.critical_dropped = 0
+
+        self.batched_events = 0
+
+        self.streamed_events = 0
 
         self.priority_counts = {
             "critical": 0,
@@ -40,57 +49,83 @@ class Metrics:
 
         self.last_updated = time.time()
 
-    def record(self, decision: Decision):
+
+    def record_decision(
+        self,
+        decision: Decision
+    ):
 
         self.total_events += 1
 
         priority = decision.priority.lower()
+
         action = decision.action
 
-        # Priority
         if priority in self.priority_counts:
 
             self.priority_counts[priority] += 1
 
-        # Action
         if action in self.action_counts:
 
             self.action_counts[action] += 1
 
-        # Status
         if action == "SHED":
 
             self.shed_events += 1
 
-        elif action == "DEFER":
+            # Safety guarantee
+            if priority == "critical":
 
-            self.deferred_events += 1
+                self.critical_dropped += 1
 
-        else:
-
-            self.processed_events += 1
-
-        # Queue
         self.queue_depth[priority] = (
             decision.queue_depth_at_decision
         )
 
-        # Traffic
         self.current_traffic_rate = (
             decision.traffic_rate
         )
 
-        # Processing cost
         self.total_processing_cost += (
             decision.processing_cost
         )
 
-        # Region
         self.region_counts[
             decision.region
         ] += 1
 
         self.last_updated = time.time()
+
+
+    def record_processed(
+        self,
+        decision: Decision,
+        result
+    ):
+
+        self.processed_events += 1
+
+        if result.get("mode") == "stream":
+
+            self.streamed_events += 1
+
+        elif result.get("mode") == "batch":
+
+            self.batched_events += 1
+
+
+        self.last_updated = time.time()
+
+
+    def record_deferred(
+        self,
+        decision: Decision
+    ):
+
+        self.deferred_events += 1
+
+        self.last_updated = time.time()
+
 
     def get_status(self):
 
@@ -119,6 +154,15 @@ class Metrics:
             "shed_events":
                 self.shed_events,
 
+            "critical_dropped":
+                self.critical_dropped,
+
+            "streamed_events":
+                self.streamed_events,
+
+            "batched_events":
+                self.batched_events,
+
             "traffic_rate":
                 round(
                     self.current_traffic_rate,
@@ -146,6 +190,7 @@ class Metrics:
             "last_updated":
                 self.last_updated
         }
+
 
     def reset(self):
 
